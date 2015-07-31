@@ -23,6 +23,7 @@ type Driver struct {
 	DiskSize      int
 	AuthTokenPath string
 	Project       string
+	Tags          []string
 }
 
 func init() {
@@ -32,7 +33,7 @@ func init() {
 	})
 }
 
-// RegisterCreateFlags registers the flags this driver adds to
+// GetCreateFlags registers the flags this driver adds to
 // "docker hosts create"
 func GetCreateFlags() []cli.Flag {
 	return []cli.Flag{
@@ -92,6 +93,11 @@ func GetCreateFlags() []cli.Flag {
 			Usage:  "GCE Instance Preemptibility",
 			EnvVar: "GOOGLE_PREEMPTIBLE",
 		},
+		cli.StringFlag{
+			Name:   "google-tags",
+			Usage:  "GCE Instance Tags (comma-separated)",
+			EnvVar: "GOOGLE_TAGS",
+		},
 	}
 }
 
@@ -101,15 +107,16 @@ func NewDriver(machineName string, storePath string, caCert string, privateKey s
 	return &Driver{BaseDriver: inner}, nil
 }
 
+// GetSSHHostname returns hostname for use with ssh
 func (d *Driver) GetSSHHostname() (string, error) {
 	return d.GetIP()
 }
 
+// GetSSHUsername returns username for use with ssh
 func (d *Driver) GetSSHUsername() string {
 	if d.SSHUser == "" {
 		d.SSHUser = "docker-user"
 	}
-
 	return d.SSHUser
 }
 
@@ -129,6 +136,7 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	d.AuthTokenPath = flags.String("google-auth-token")
 	d.Project = flags.String("google-project")
 	d.Scopes = flags.String("google-scopes")
+	d.Tags = flags.StringSlice("google-tags")
 	d.SwarmMaster = flags.Bool("swarm-master")
 	d.SwarmHost = flags.String("swarm-host")
 	d.SwarmDiscovery = flags.String("swarm-discovery")
@@ -144,6 +152,8 @@ func (d *Driver) initApis() (*ComputeUtil, error) {
 	return newComputeUtil(d)
 }
 
+// PreCreateCheck allows for pre-create operations to make sure a driver is ready for creation
+// It's a noop on GCE.
 func (d *Driver) PreCreateCheck() error {
 	return nil
 }
