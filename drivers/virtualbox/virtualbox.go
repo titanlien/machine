@@ -45,6 +45,7 @@ const (
 var (
 	ErrUnableToGenerateRandomIP = errors.New("unable to generate random IP")
 	ErrMustEnableVTX            = errors.New("This computer doesn't have VT-X/AMD-v enabled. Enabling it in the BIOS is mandatory.")
+	ErrNetworkAddrCidr          = errors.New("host-only cidr must be specified with a host address, not a network address")
 )
 
 type Driver struct {
@@ -185,24 +186,6 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 func (d *Driver) PreCreateCheck() error {
 	// Check that VBoxManage exists and works
 	return d.vbm()
-}
-
-// IsVTXDisabled checks if VT-X is disabled in the BIOS. If it is, the vm will fail to start.
-// If we can't be sure it is disabled, we carry on and will check the vm logs after it's started.
-func (d *Driver) IsVTXDisabled() bool {
-	if runtime.GOOS == "windows" {
-		output, err := cmdOutput("wmic", "cpu", "get", "VirtualizationFirmwareEnabled")
-		if err != nil {
-			log.Debugf("Couldn't check that VT-X/AMD-v is enabled. Will check that the vm is properly created: %v", err)
-			return false
-		}
-
-		disabled := strings.Contains(output, "FALSE")
-		return disabled
-	}
-
-	// TODO: linux and OSX
-	return false
 }
 
 // cmdOutput runs a shell command and returns its output.
@@ -676,19 +659,17 @@ func (d *Driver) setupHostOnlyNetwork(machineName string) error {
 		hostOnlyCIDR = defaultHostOnlyCIDR
 	}
 
-	ip, network, err := net.ParseCIDR(hostOnlyCIDR)
-
+	ip, network, err := parseAndValidateCIDR(hostOnlyCIDR)
 	if err != nil {
 		return err
 	}
-
-	nAddr := network.IP.To4()
 
 	dhcpAddr, err := getRandomIPinSubnet(network.IP)
 	if err != nil {
 		return err
 	}
 
+	nAddr := network.IP.To4()
 	lowerDHCPIP := net.IPv4(nAddr[0], nAddr[1], nAddr[2], byte(100))
 	upperDHCPIP := net.IPv4(nAddr[0], nAddr[1], nAddr[2], byte(254))
 
@@ -711,6 +692,20 @@ func (d *Driver) setupHostOnlyNetwork(machineName string) error {
 		"--nicpromisc2", d.HostOnlyPromiscMode,
 		"--hostonlyadapter2", hostOnlyNetwork.Name,
 		"--cableconnected2", "on")
+}
+
+func parseAndValidateCIDR(hostOnlyCIDR string) (net.IP, *net.IPNet, error) {
+	ip, network, err := net.ParseCIDR(hostOnlyCIDR)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	networkAddress := network.IP.To4()
+	if ip.Equal(networkAddress) {
+		return nil, nil, ErrNetworkAddrCidr
+	}
+
+	return ip, network, nil
 }
 
 // createDiskImage makes a disk image at dest with the given size in MB. If r is
